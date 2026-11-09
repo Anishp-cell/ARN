@@ -46,12 +46,16 @@ When ready to push to public GitHub:
 
 To publish the model card and weights to Hugging Face Hub:
 
+v2 repo: `AnishPathak2202/arn-v2` (confirm before creating; the public repo is created on first upload).
+
+Staging folder (already built): it holds `README.md` (the v2 model card with a Hugging Face header), `arn_v2_seed42.pt`, `arn_v2_seed1.pt`, `arn_v2_seed2.pt`, and `environment_v2.json`.
+
 ```bash
-huggingface-cli login
-huggingface-cli upload Anishp-cell/arn-tiny checkpoints/arn_final_model/ . --repo-type model
+hf auth whoami                      # check the logged-in account
+hf upload AnishPathak2202/arn-v2 <staging folder> . --repo-type model
 ```
 
-Include `MODEL_CARD.md` as the `README.md` on Hugging Face.
+Fill in the GitHub repo link in the model card before uploading.
 
 ---
 
