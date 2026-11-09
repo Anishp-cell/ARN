@@ -1,12 +1,16 @@
-# ARN: Aether Routing Network (v1.0.0)
+# ARN: Aether Routing Network (v2)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-1.23.2-brightgreen)](https://onnxruntime.ai/)
 
-**ARN (Aether Routing Network)** is an ultra-compact, non-generative neural tool orchestrator and argument extractor designed for real-time edge dispatch. Rather than querying multi-billion parameter autoregressive LLMs for standard on-device commands, ARN formulates tool selection and argument parsing as a joint multi-label classification and linear-chain conditional random field (CRF) sequence tagging problem over a 4.39M parameter bidirectional Transformer trunk (`google/bert_uncased_L-2_H-128_A-2`).
+**ARN (Aether Routing Network)** is a small model for on-device function calling. Given a request and a fixed list of functions, it picks the functions that apply and marks the words that are their arguments. It does not generate text.
 
-In rigorous 15-fold cluster-stratified cross-validation, the fine-tuned joint encoder-CRF architecture achieves **16.91% Joint Exact Match** and **67.88% Lenient Slot F1**, with an ONNX INT8 runtime latency of **1.39 ms** (1 thread) / **0.75 ms** (4 threads) and a peak process memory of **58.69 MB RSS** (12.37 MB incremental over the bare runtime) on host CPU.
+ARN v2 has 4.44M parameters (a BERT-Tiny encoder). On Google's Mobile Actions test set (961 requests), it scores **89.32% exact match** (mean of 3 seeds). It takes about **11 ms per request** on one CPU thread. Its date rules matter a lot: without them the score falls to 55%. The Mobile Actions test split was inspected during development, so treat these as exploratory results. The pre-registered MixATIS and MixSNIPS results are in the table below.
+
+Model card: [`MODEL_CARD.md`](MODEL_CARD.md). Full tables and disclosures: [`docs/RESULTS_v2.md`](docs/RESULTS_v2.md).
+
+> **v1 is withdrawn.** The v1 headline numbers were measured on a split that leaked near-copies of examples between training and test. Those numbers, and the v1 specifications below, are kept only for history. Do not cite them.
 
 ---
 
@@ -24,7 +28,9 @@ Important limitations: ~33 points of the Mobile Actions score depend on the rule
 
 ---
 
-## Key Characteristics & Verified Specifications
+## v1 specifications (withdrawn; history only)
+
+These v1 numbers are withdrawn. They are kept for history and should not be cited. Use the v2 results above.
 
 All metrics reported below trace directly to [`results/ledger.json`](results/ledger.json), [`results/master_protocol_summary.json`](results/master_protocol_summary.json), and [`results/deployment_benchmark.json`](results/deployment_benchmark.json):
 
