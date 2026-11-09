@@ -43,5 +43,7 @@ The caveats, up front:
 - The full limitations are in the repo.
 
 **7/7**
-Model on Hugging Face and code on GitHub: [links once live]. Paper: coming soon.
+Model: huggingface.co/AnishPathak2202/arn-v2
+Code: github.com/Anishp-cell/ARN
+Paper: coming soon.
 Feedback welcome, especially where the date rules or the fixed function list break on your data.
