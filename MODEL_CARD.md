@@ -1,98 +1,139 @@
-# Model Card for ARN (Aether Routing Network) v1.0.0
+# Model Card: ARN-v2 (Aether Routing Network v2)
 
-## 1. Model Details
+ARN-v2 is a small model (4.44M parameters) that picks which function to call from a fixed list, and marks the words in the request that are its arguments. It does not write text. It labels the request.
 
-- **Model Name:** ARN Final Model (`arn_final_model`)
-- **Model Version:** 1.0.0
-- **Model Architecture:** Joint Encoder-CRF (`CLSCRFModel`)
-  - **Backbone Trunk:** `google/bert_uncased_L-2_H-128_A-2` (2 layers, 128 hidden dimension, 2 attention heads, fine-tuned end-to-end)
-  - **Tool Routing Head:** Linear multi-label projection (`128 -> 18`) over pooled `[CLS]` embedding with sigmoid activation
-  - **Slot Extraction Head:** Linear token emission projection (`128 -> 26`) over sequence representations
-  - **Sequence Decoder:** Linear-chain Conditional Random Field (CRF) with hard BIO validity masking
-- **Total Parameter Count:** 4,386,474 parameters
-  - Backbone Encoder: 4,380,288 parameters
-  - Tool Classifier Head: 2,322 parameters
-  - Slot Emission Head: 3,354 parameters
-  - CRF Transition Matrix: 728 parameters
-- **License:** MIT License
-- **Frameworks:** PyTorch 2.x, HuggingFace Transformers, ONNX Runtime 1.23.2
+This card covers v2. The first version (v1) is withdrawn. Its evaluation split leaked near-copies of examples between training and test, so its headline numbers do not hold. The v1 history is in git.
 
 ---
 
-## 2. Intended Use & Scope
+## 1. Model details
 
-### Primary Intended Uses:
-- **On-Device Command Routing:** Deterministic, low-latency classification of natural language user requests to closed API endpoints ($K=18$).
-- **Verbatim Slot Extraction:** High-speed extraction of entity argument spans (e.g., recipient names, device identifiers, command strings, web queries) directly from user utterances.
-- **Privacy-Preserving Edge Dispatch:** Local edge inference on host PCs, embedded appliances, and mobile devices without sending user audio or text transcripts to external cloud services.
-
-### Out-of-Scope & Prohibited Uses:
-- **Open-Domain Generative Dialogue:** ARN is non-generative by design and does not produce autoregressive text responses.
-- **Multi-Turn Discourse Tracking:** Evaluated on single-turn conversational commands; multi-turn co-reference resolution is not natively supported.
-- **Autonomous Unconstrained Execution:** Critical system commands (`run_computer_command`) should remain gated behind human confirmation dialogs in downstream runtime orchestrators.
-
----
-
-## 3. Training Data & Methodology
-
-- **Training Corpus:** 5,000 verified conversational command utterances from `aether_orchestrator_dataset.jsonl` (SHA-256: `d2f25d93a7123226f5f849e7f72391a2fd8b93c1b04c79fa2f5a2c8b8d5a95b9`).
-- **Semantic Coverage:** 253 semantic paraphrase clusters spanning 18 canonical tool APIs.
-- **Argument Representation:** 94.79% verbatim substring arguments, 5.21% non-verbatim (temporal/implied).
-- **Optimization Strategy:**
-  - Joint Loss: $\mathcal{L} = \mathcal{L}_{\text{BCE}} + \frac{1}{T}\mathcal{L}_{\text{CRF\_NLL}}$
-  - Optimizer: AdamW
-  - Trunk Learning Rate: $3 \times 10^{-5}$
-  - Head Learning Rate: $1 \times 10^{-3}$
-  - Batch Size: 64
-  - Weight Decay: 0.01
-  - Epochs: 10
-  - Optimal Activation Threshold ($\tau$): 0.30 (median selected across 15 validation folds)
+- **Name:** ARN-v2, BERT-Tiny + FAR-v2 router (`arn_v2_tiny_far`)
+- **Parameters:** 4,440,019 (checked against the saved checkpoints)
+- **Architecture:**
+  - Encoder: `google/bert_uncased_L-2_H-128_A-2` (2 layers, hidden size 128), fine-tuned end to end.
+  - Tool router: FAR-v2, a factored attention router with a per-tool bias and a [CLS] residual. It outputs one score per tool.
+  - Argument tagger: a linear layer plus a linear-chain CRF over tool-qualified BIO tags, such as `B-send_email.subject`. Invalid tag transitions are masked.
+  - Decoder: constrained joint decoding. It scores candidate tool sets against the CRF and keeps the best tool set and span assignment.
+  - Dates and times: a rule-based canonicalizer. Its conventions were fitted on the training split only.
+- **Checkpoints (FP32 PyTorch, about 17.8 MB each):** `arn_v2_tiny_far_s42_newdec.pt`, `..._far_s1.pt`, `..._far_s2.pt`. Each checkpoint stores its own tool and tag registry.
+- **Version:** v2, November 2026
+- **License:** MIT (code and checkpoints). The training data is Google's Mobile Actions dataset, which has its own terms. Check its dataset card before reuse.
 
 ---
 
-## 4. Evaluated Performance Metrics
+## 2. Intended use
 
-All metrics were established under the pre-registered Master Protocol across 15 outer folds (5 folds $\times$ 3 cluster-stratified shuffles, 2,000-iteration cluster bootstrap):
+- Routing a short user request to one or more functions from a **fixed, known list** (the registry), and extracting the argument values.
+- Research on small, non-generative function calling and on how much of the result depends on rules.
+- Running on a CPU with no network access. It takes about 11 ms per request on one thread.
 
-| Metric | Mean ± Std | 95% Bootstrap CI | Baseline Comparison (Frozen Trunk) |
-| :--- | :---: | :---: | :--- |
-| **Joint Exact Match** | **16.91% ± 6.56%** | [13.51%, 20.59%] | +13.47% improvement over frozen trunk [10.27%, 16.68%] |
-| **Tool Subset Accuracy** | **39.91% ± 12.19%** | [34.78%, 45.45%]) | +25.70% improvement over frozen trunk [20.73%, 30.67%] |
-| **Strict Span F1** | **43.61% ± 10.43%** | [39.02%, 48.06%] | +18.85% improvement over frozen trunk [14.41%, 23.29%] |
-| **Lenient Span F1** | **67.88% ± 9.86%** | [63.66%, 71.93%] | Substantial boundary shift tolerance |
-| **BIO Sequence Violations** | **0.00%** | [0.00%, 0.00%] | Enforced by hard-masked Viterbi transition matrix |
-
----
-
-## 5. Deployment & Hardware Benchmarks
-
-Evaluated on host **13th Gen Intel Core i7-13700HX (Windows 11, ONNX Runtime 1.23.2)**:
-
-| Quantization / Runtime | Latency (1 Thread) | Latency (4 Threads) | Disk Size | Compression Ratio |
-| :--- | :---: | :---: | :---: | :---: |
-| **PyTorch CPU FP32** | 11.70 ms mean | 8.15 ms mean | 17.58 MB | 1.00x |
-| **ONNX Runtime FP32** | 2.50 ms mean | 1.35 ms mean | 16.75 MB | 1.05x |
-| **ONNX Runtime INT8** | **1.39 ms mean** | **0.75 ms mean** | **4.28 MB** | **3.92x** |
-| **Full Pipeline (INT8 + Viterbi)** | **3.10 ms mean** | **2.34 ms mean** | — | — |
-
-- **Peak RSS:** **58.69 MB** (12.37 MB incremental over the bare ONNX runtime), per `results/deployment_benchmark.json`. The previously stated 4.21 MB was a measurement artefact (identical for PyTorch and ONNX) and is withdrawn.
+### Out of scope
+- **Open-ended chat.** The model does not generate text.
+- **Unknown tools.** It can only pick from the registry it was trained with. A new tool needs new training data.
+- **The same tool twice in one request.** No evaluation row needs this, so the model is not designed for it.
+- **Autonomous high-impact actions.** Destructive or sensitive functions (for example, deleting files or sending money) need a human confirmation step in the app that calls the model.
+- **Non-English requests.** Training and evaluation are in English only.
 
 ---
 
-## 6. Limitations & Known Failure Modes
+## 3. Training and evaluation data
 
-1. **Boundary Shifts (42.71% of errors):**
-   - Fine-grained tokenization boundary shifts (e.g. including or omitting articles "the", "a", or prepositions "to", "on") represent the dominant error mode. While slot category is correct, strict span F1 penalizes boundary shifts.
-2. **Rare Tool Cold-Start:**
-   - Single-cluster tools (e.g., `open_url` with 37 samples in 1 cluster) cannot be reliably evaluated under zero-shot cluster holdouts and require template diversification.
-3. **Multi-Tool Pair Density:**
-   - The 5,000-sample dataset contains 1,132 multi-tool utterances (22.64%) over 7 tool pairs (recounted 2026-11-08 from `data/raw/aether_orchestrator_dataset.jsonl`; the earlier "114" was the count of one pair, `handle_smart_home + media_control`). Generalization to unseen pairwise compositions remains constrained by training pair support.
-4. **v2 scope:** Aether Routing Network v2 results (Google Mobile Actions, MixATIS, MixSNIPS) and their limitations are documented in `docs/RESULTS_v2.md`.
+- **Train:** Google Mobile Actions, `metadata == "train"`. Split into 90% fit and 10% validation with a fixed seed.
+- **Test:** Google Mobile Actions, `metadata == "eval"`, 961 requests. Scored with strict exact match.
+- **Important:** the test split was inspected during development. Decoder changes were made while looking at test errors, and each change was then checked on validation and on train. The Mobile Actions numbers are therefore an **exploratory** result. The pre-registered MixATIS and MixSNIPS results (Section 4.3) are the confirmatory evidence.
 
 ---
 
-## 7. Ethical & Environmental Considerations
+## 4. Results
 
-- **Privacy:** ARN processes queries entirely locally. No audio, text transcripts, or metadata leave the host machine.
-- **Environmental Impact:** Training the complete 4.39M parameter model requires $< 0.005$ kWh of electricity ($< 2.5$ grams $\text{CO}_2\text{e}$), orders of magnitude below LLM fine-tuning runs.
-- **Safety Gating:** Automated tools with destructive potential (`run_computer_command`) must incorporate explicit confirmation hooks in consumer applications.
+All ARN-v2 numbers are averages over three training seeds (42, 1, 2), with the spread shown as ± standard deviation. The per-seed predictions are saved in `results/xmodel/`. Re-scoring them with `src/arn/eval/mobile_actions_scorer.py` reproduces the per-seed numbers: 89.28, 89.80, and 88.87.
+
+### 4.1 Google Mobile Actions (test, 961 requests, strict exact match)
+
+| System | Parameters | Trained on train split | Strict exact match |
+|---|---|---|---|
+| **ARN-v2, BERT-Tiny + FAR-v2** | **4.44M** | yes | **89.32 ± 0.47** |
+| ARN-v2, BERT-Mini trunk | 11.38M | yes | 89.91 ± 0.46 |
+| FunctionGemma-270M, fine-tuned by us, same rows and recipe | 268M | yes | 85.12 |
+| LFM2.5-230M, fine-tuned by us, default recipe | 230M | yes | 91.57 |
+| LFM2.5-230M, fine-tuned by us, best of a 5-setting sweep (selected on validation) | 230M | yes | 92.51 |
+
+Paired bootstrap over test rows, seed-matched: ARN-v2 minus fine-tuned FunctionGemma is +4.16, +4.68, and +3.75 points across the three seeds. Each 95% interval is above zero. ARN-v2 minus LFM2.5 (default recipe) is −2.29, −1.77, and −2.71. Those intervals are below zero, or touch it.
+
+**Comparison caveat.** The FunctionGemma row is our fine-tune on the same rows. It is not Google's released checkpoint. A third-party paper reports 90.32 for Google's released Mobile Actions checkpoint, in a different harness, so the two are not directly comparable.
+
+### 4.2 Ablations (3 seeds)
+
+| Variant | Mean ± SD | Change vs full |
+|---|---|---|
+| Full system | 89.32 ± 0.47 | — |
+| No datetime canonicalizer | 55.22 ± 0.37 | about −34 points, all seeds |
+| Keyword call ordering replaced by attention ordering | 85.81 ± 6.12 | −10.5 points on seed 42, no change on seeds 1 and 2 |
+| No multi-span join | 88.17 ± 0.42 | about −1 point |
+| No registry mask in decoding | 89.21 ± 0.47 | about −0.1 point |
+
+The canonicalizer and keyword ordering are rule-based. The system is a neural model plus rules, and the rules matter a lot.
+
+### 4.3 Pre-registered benchmarks (no rules; test read once per seed)
+
+| Benchmark | Overall accuracy (3 seeds) |
+|---|---|
+| MixATIS (828 utterances) | 40.94 ± 2.62 |
+| MixSNIPS (2,199 utterances) | 70.29 ± 0.46 |
+
+These are below several published multi-intent models, including some BiLSTM models that are smaller than ARN-v2 (about 0.6 to 0.9M parameters). These benchmarks test whether the model works without the Mobile Actions rules, and it does not work as well on them.
+
+### 4.4 Speed
+
+One request at a time, FP32 PyTorch, CPU on a Windows laptop, warm-up discarded. p50 is the median time per request. p90 is the 90th percentile.
+
+| System | Threads | p50 | p90 |
+|---|---|---|---|
+| ARN-v2, end to end (including tokenization) | 1 | 11.40 ms | 18.22 ms |
+| ARN-v2, end to end | 4 | 4.10 ms | 6.15 ms |
+| LFM2.5-230M | 1 | 4,316 ms | 9,250 ms |
+| FunctionGemma-270M | 1 | 4,613 ms | 8,299 ms |
+
+The generative-model numbers are not tuned. Optimized runtimes would be faster. Full table: `results/latency_v2.json`.
+
+---
+
+## 5. How to reproduce
+
+Re-score the saved predictions (no training needed): use `src/arn/eval/mobile_actions_scorer.py` on `results/xmodel/arn_v2_tiny_far_s42_newdec.json`, with the eval rows of the Mobile Actions dataset.
+
+Re-decode a checkpoint with the current decoder (no retraining):
+
+```
+python scripts/v2_redecode.py --data <path to Mobile Actions dataset.jsonl> --ckpt checkpoints/v2/arn_v2_tiny_far_s42_newdec.pt
+```
+
+Training: `scripts/v2_train_mobile.py`. Pinned environment: `results/environment_v2.json`. The PyTorch build is a nightly, so pin the exact version to reproduce.
+
+---
+
+## 6. Limitations and failure modes
+
+1. **Rules do a lot of the work.** Without the datetime canonicalizer the score drops to 55%. Without keyword ordering it can drop by up to about 10 points, depending on the seed.
+2. **Closed registry.** A tool outside the training registry cannot be called, and a new tool needs new training data.
+3. **Test split used during development.** See Section 3.
+4. **Single-turn requests only.** Multi-turn context and pronoun references are not handled.
+5. **Narrow coverage.** The model has only seen the Mobile Actions tool set and phrasings. It has not been tested on real users' speech or real device data. On MixATIS and MixSNIPS it scores lower.
+6. **Confidence is not calibrated.** Do not treat a score as a reliability guarantee.
+
+Full disclosures and the robustness checks (train/test overlap, nearest-neighbour splits): `docs/RESULTS_v2.md`, Section 4.
+
+---
+
+## 7. Ethical and safety notes
+
+- **Local by design.** The model runs without a network connection, and no request text leaves the device.
+- **Confirmation gate.** Any function that can cause harm must require user confirmation in the calling app. The model does not check this.
+- **Bias.** The training data is short, English, assistant-style requests. Accents, dialects, and other languages are not covered.
+
+---
+
+## 8. Contact and status
+
+This is a student research project. It has not been peer-reviewed. Please report errors, failed reproductions, or evaluation concerns as GitHub issues. Corrections to published numbers will be made in this card and in `docs/RESULTS_v2.md`, with the date of each change.
